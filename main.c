@@ -3,10 +3,16 @@
 #include <pthread.h>
 #include <errno.h>
 #include <malloc.h>
+#include <unistd.h>
+
+#define ORDER_WINE 1
+#define PAYMENT 2
+#define END_WORK 3
 
 
 typedef  struct {
-    int rodzaj;
+    int type;
+    int wine_type;
     int gotowe;
 } Zamowienie;
 
@@ -50,13 +56,13 @@ void* klient_fun (void* args){
         //wymyślanie zamówienia
 
         Zamowienie* z = malloc(sizeof(Zamowienie));
-
-        z->rodzaj = rand() % 3;
+        z-> type = ORDER_WINE;
+        z->wine_type = rand() % 3;
         z->gotowe = 0;
 
         printf("Klient %d zamawia wino %d\n",
                data->klient_id,
-               z->rodzaj);
+               z->wine_type);
 
         pthread_mutex_lock(&data->queue->mutex);
 
@@ -72,11 +78,31 @@ void* klient_fun (void* args){
 
         printf("Klient %d dostał wino %d\n",
                data->klient_id,
-               z->rodzaj);
+               z->wine_type);
 
         //zwalnianie pamięci wykorzystanych zamówień
         free(z);
     }
+    Zamowienie* pay = malloc(sizeof(Zamowienie));
+
+    pay->type = PAYMENT;
+    pay->gotowe = 0;
+
+    pthread_mutex_lock(&data->queue->mutex);
+
+    data->queue->queue[data->queue->rear] = pay;
+
+    data->queue->rear++;
+
+    pthread_cond_signal(&data->queue->not_empty);
+
+    pthread_mutex_unlock(&data->queue->mutex);
+
+    while (pay->gotowe == 0);
+
+    printf("Klient %d placi",
+           data->klient_id
+    );
 
     printf("Klient %d wychodzi\n", data->klient_id);
 
@@ -107,36 +133,42 @@ void* kelner_fun(void* arg) {
 
         pthread_mutex_unlock(&queue->mutex);
 
-        // wybór odpowiedniego wina
-        wine_t* wine = &data->wines[z->rodzaj];
+        if (z->type == ORDER_WINE) {
+
+            // wybór odpowiedniego wina
+            wine_t *wine = &data->wines[z->wine_type];
 
 
+            pthread_mutex_lock(&wine->mutex);
 
-        pthread_mutex_lock(&wine->mutex);
+            while (wine->beczki == 0) {
+                pthread_cond_wait(&wine->available, &wine->mutex);
+            }
 
-        while (wine->beczki == 0) {
-            pthread_cond_wait(&wine->available, &wine->mutex);
+            wine->beczki--;
+
+            pthread_mutex_unlock(&wine->mutex);
+
+
+            printf("Kelner nalewa wino rodzaju %d\n", z->wine_type);
+
+            z->gotowe = 1;
+
+            pthread_mutex_lock(&wine->mutex);
+
+            wine->beczki++;
+
+            pthread_cond_signal(&wine->available);
+
+            pthread_mutex_unlock(&wine->mutex);
         }
+        else if (z->type == PAYMENT) {
+            printf("Kelner przyjmuje płatność\n");
 
-        wine->beczki--;
+            //sleep(1);
 
-        pthread_mutex_unlock(&wine->mutex);
-
-
-
-        printf("Kelner nalewa wino rodzaju %d\n", z->rodzaj);
-
-        z->gotowe = 1;
-
-
-
-        pthread_mutex_lock(&wine->mutex);
-
-        wine->beczki++;
-
-        pthread_cond_signal(&wine->available);
-
-        pthread_mutex_unlock(&wine->mutex);
+            z->gotowe = 1;
+        }
     }
 
     return NULL;
