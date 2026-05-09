@@ -112,10 +112,10 @@ void* klient_fun (void* args){
 
 void* kelner_fun(void* arg) {
 
-    KelnerArgs* data = (KelnerArgs*)arg;
+    KelnerArgs *data = (KelnerArgs *) arg;
 
-    Zamowienie* z = data->zam;
-    OrderQueue* queue = data->zam;
+    Zamowienie *z = data->zam;
+    OrderQueue *queue = data->zam;
 
     while (1) {
 
@@ -127,7 +127,7 @@ void* kelner_fun(void* arg) {
         }
 
         // pobranie zamówienia
-        Zamowienie* z = queue->queue[queue->front];
+        Zamowienie *z = queue->queue[queue->front];
 
         queue->front++;
 
@@ -161,86 +161,106 @@ void* kelner_fun(void* arg) {
             pthread_cond_signal(&wine->available);
 
             pthread_mutex_unlock(&wine->mutex);
-        }
-        else if (z->type == PAYMENT) {
+        } else if (z->type == PAYMENT) {
             printf("Kelner przyjmuje płatność\n");
 
             //sleep(1);
 
             z->gotowe = 1;
+        } else if (z->type == END_WORK) {
+            free(z);
+            break;
         }
+        
     }
-
     return NULL;
 }
 
-
 int main() {
 
-    wine_t wines[3];
+        wine_t wines[3];
+
+        for (int i = 0; i < 3; i++) {
+            wines[i].beczki = 2;
+            pthread_mutex_init(&wines[i].mutex, NULL);
+            pthread_cond_init(&wines[i].available, NULL);
+        }
+
+
+        pthread_t kelner[3];
+
+        pthread_t klient[10];
+
+
+        OrderQueue oq;
+        oq.front = 0;
+        oq.rear = 0;
+
+        ClientArgs client_args[10];
+
+        for (int i = 0; i < 10; i++) {
+            client_args[i].klient_id = i;
+            client_args[i].queue = &oq;
+
+            pthread_create(&klient[i], NULL,
+                           klient_fun,
+                           &client_args[i]);
+
+        }
+
+        KelnerArgs kelner_args[3];
+
+        for (int i = 0; i < 3; i++) {
+            kelner_args[i].zam = &oq;
+            kelner_args[i].wines = wines;
+
+            pthread_create(&kelner[i], NULL,
+                           kelner_fun,
+                           &kelner_args[i]);
+        }
+
+        pthread_mutex_init(&oq.mutex, NULL);
+        pthread_cond_init(&oq.not_empty, NULL);
+
+        for (int i = 0; i < 10; i++) {
+            pthread_create(&klient[i], NULL, klient_fun, &client_args[i]);
+        }
+        for (int i = 0; i < 3; i++) {
+            pthread_create(&kelner[i], NULL, kelner_fun, &kelner_args[i]);
+        }
+
+        for (int i = 0; i < 10; i++) {
+            pthread_join(klient[i], NULL);
+        }
 
     for (int i = 0; i < 3; i++) {
-        wines[i].beczki = 2;
-        pthread_mutex_init(&wines[i].mutex, NULL);
-        pthread_cond_init(&wines[i].available, NULL);
+
+        Zamowienie* end = malloc(sizeof(Zamowienie));
+
+        end->type = END_WORK;
+
+        pthread_mutex_lock(&oq.mutex);
+
+        oq.queue[oq.rear] = end;
+        oq.rear++;
+
+        pthread_cond_signal(&oq.not_empty);
+
+        pthread_mutex_unlock(&oq.mutex);
     }
 
-
-    pthread_t kelner[3];
-
-    pthread_t klient[10];
-
-
-    OrderQueue oq;
-    oq.front = 0;
-    oq.rear = 0;
-
-    ClientArgs client_args[10];
-
-    for(int i = 0; i < 10; i++){
-        client_args[i].klient_id = i;
-        client_args[i].queue = &oq;
-
-        pthread_create(&klient[i], NULL,
-                       klient_fun,
-                       &client_args[i]);
-
-    }
-
-    KelnerArgs kelner_args[3];
-
-    for (int i = 0; i < 3; i++){
-        kelner_args[i].zam = &oq;
-        kelner_args[i].wines = wines;
-
-        pthread_create(&kelner[i], NULL,
-                       kelner_fun,
-                       &kelner_args[i]);
-    }
-
-    pthread_mutex_init(&oq.mutex, NULL);
-    pthread_cond_init(&oq.not_empty, NULL);
-
-    for (int i = 0; i < 10; i++) {
-    pthread_create(&klient[i], NULL, klient_fun, &client_args[i]);
-    }
-    for (int i = 0; i < 3; i++) {
-        pthread_create(&kelner[i], NULL, kelner_fun, &kelner_args[i]);
-    }
-
-    for (int i = 0; i < 10; i++) {
-        pthread_join(klient[i], NULL);
-    }
 
     for (int i = 0; i < 3; i++) {
-        pthread_join(kelner[i], NULL);
-    }
+            pthread_join(kelner[i], NULL);
+        }
 
-    for (int i = 0; i < 3; i++) {
-        pthread_mutex_destroy(&wines[i].mutex);
-        pthread_cond_destroy(&wines[i].available);
-    }
+        for (int i = 0; i < 3; i++) {
+            pthread_mutex_destroy(&wines[i].mutex);
+            pthread_cond_destroy(&wines[i].available);
+        }
 
-    return 0;
+        return 0;
 }
+
+
 //comment
